@@ -5,82 +5,97 @@
 #undef HAVE_OPENCV_VIDEOIO
 #include <opencv2/highgui.hpp>
 
-f64 BaseSinusoidal(f64 amplitude, i32 period, f64 position, f64 phase = 0.0)
+static cv::Mat MakeSinusoidalPatternImage(f64 phaseShift, f64 amplitude = 255, i32 period = 10, Math::Vec2i res = { 1280, 720 })
 {
-	return (amplitude / 2) * (1 + sin(((2 * Math::Pi) / period) * position + phase));
+	cv::Mat img(res.y, res.x, CV_8UC1);
+
+	for (u32 i = 0; i < res.x; ++i)
+	{
+		f64 coFactor = amplitude / 2;
+		f64 rad = (2 * Math::Pi * i) / period;
+
+		// Pattern value
+		f64 val = coFactor * (1 + sin(rad + phaseShift));
+
+		for (u32 j = 0; j < res.y; j++)
+			img.at<u8>(j, i) = static_cast<u8>(val);
+	}
+
+	return img;
 }
 
 cv::Mat ComputePhaseMap(const cv::Mat& I1, const cv::Mat& I2, const cv::Mat& I3)
 {
-    i32 width = I1.cols, height = I1.rows;
-    cv::Mat phaseMap(height, width, CV_64F);
+	Math::Vec2i res = { I1.cols, I1.rows };
+	cv::Mat phaseMap(res.y, res.x, CV_8UC1);
 
-    for (u32 y = 0; y < height; ++y)
-    {
-        for (u32 x = 0; x < width; ++x)
-        {
-            f64 I1_val = static_cast<double>(I1.at<uint8_t>(y, x));
-            f64 I2_val = static_cast<double>(I2.at<uint8_t>(y, x));
-            f64 I3_val = static_cast<double>(I3.at<uint8_t>(y, x));
+	for (u32 y = 0; y < res.y; ++y)
+	{
+		for (u32 x = 0; x < res.x; ++x)
+		{
+			f64 I1_val = I1.at<u8>(y, x);
+			f64 I2_val = I2.at<u8>(y, x);
+			f64 I3_val = I3.at<u8>(y, x);
 
-            f64 numerator = std::sqrt(3.0) * (I1_val - I3_val);
-            f64 denominator = 2.0 * I2_val - (I1_val + I3_val);
-            f64 phi = std::atan2(numerator, denominator);
+			f64 numerator = std::sqrt(3.0) * (I1_val - I3_val);
+			f64 denominator = 2.0 * I2_val - (I1_val + I3_val);
+			f64 phi = std::atan2(numerator, denominator);
 
-            phaseMap.at<double>(y, x) = phi;
-        }
-    }
+			phaseMap.at<u8>(y, x) = static_cast<u8>(phi);
+		}
+	}
 
-    return phaseMap;
+	return phaseMap;
 }
 
-cv::Mat NormalizePhaseMap(const cv::Mat& phaseMap)
+cv::Mat HarmonicMeanWithLimitation(const cv::Mat& p1, const cv::Mat& p2)
 {
-    i32 width = phaseMap.cols, height = phaseMap.rows;
-    cv::Mat normalizedImage(height, width, CV_8UC1);
+	Math::Vec2i res = { p1.cols, p1.rows };
+	cv::Mat phaseMap(res.y, res.x, CV_8UC1);
 
-    for (u32 y = 0; y < height; ++y)
-    {
-        for (u32 x = 0; x < width; ++x)
-        {
-            f64 phi = phaseMap.at<f64>(y, x);
-            u8 normalizedValue = static_cast<u8>(std::round((phi + Math::Pi) / (2.0 * Math::Pi) * 255.0));
-            normalizedImage.at<u8>(y, x) = normalizedValue;
-        }
-    }
+	for (u32 y = 0; y < res.y; ++y)
+	{
+		for (u32 x = 0; x < res.x; ++x)
+		{
+			f64 phi1 = p1.at<u8>(y, x);
+			f64 phi2 = p1.at<u8>(y, x);
 
-    return normalizedImage;
+			f64 diff = phi2 - phi1;
+
+			if (diff > CV_PI)
+				phi2 -= 2.0f * CV_PI;
+			else if (diff < -CV_PI)
+				phi2 += 2.0f * CV_PI;
+
+			f64 phaseVal = (phi1 + phi2) / 2.0f;
+
+			if (phaseVal > CV_PI)
+				phaseVal -= 2.0f * CV_PI;
+			else if (phaseVal < -CV_PI)
+				phaseVal += 2.0f * CV_PI;
+
+			phaseMap.at<u8>(y, x) = phaseVal;
+		}
+	}
+
+	return phaseMap;
 }
 
 i32 main(i32 argC, i8** argV)
 {
-    Math::Vec2i resSize = { 1280,720 };
+	i32 period = 10;
+	f64 amplitude = 255;
 
-    i32 period = 10;
-    f64 amplitude = 255;
-    f64 phaseShift[] = { 0, Math::Pi / 2, Math::Pi };
+	std::vector<cv::Mat> imgs(6);
+	for (u32 i = 0; i < imgs.size(); ++i)
+		imgs[i] = MakeSinusoidalPatternImage(i * Math::Pi / 3);
 
-    cv::Mat I1(resSize.y, resSize.x, CV_8UC1);
-    cv::Mat I2(resSize.y, resSize.x, CV_8UC1);
-    cv::Mat I3(resSize.y, resSize.x, CV_8UC1);
+	std::vector<cv::Mat> pMaps(2);
+	for (u32 i = 0; i < pMaps.size(); ++i)
+		pMaps[i] = ComputePhaseMap(imgs[i * 3], imgs[(i * 3) + 1], imgs[(i * 3) + 2]);
 
-    for (u32 x = 0; x < resSize.x; ++x)
-    {
-        f64 intensity1 = BaseSinusoidal(amplitude, period, x, phaseShift[0]);
-        f64 intensity2 = BaseSinusoidal(amplitude, period, x, phaseShift[1]);
-        f64 intensity3 = BaseSinusoidal(amplitude, period, x, phaseShift[2]);
+	cv::Mat result = HarmonicMeanWithLimitation(pMaps[0], pMaps[1]);
 
-        for (u32 y = 0; y < resSize.y; ++y)
-        {
-            I1.at<u8>(y, x) = static_cast<u8>(intensity1);
-            I2.at<u8>(y, x) = static_cast<u8>(intensity2);
-            I3.at<u8>(y, x) = static_cast<u8>(intensity3);
-        }
-    }
-
-    cv::Mat phaseMap = ComputePhaseMap(I1, I2, I3);
-    cv::Mat normMap = NormalizePhaseMap(phaseMap);
-
-    cv::imshow("Phase Map", normMap);
-    cv::waitKey(0);
+	cv::imshow("Phase", result);
+	cv::waitKey(0);
 }
