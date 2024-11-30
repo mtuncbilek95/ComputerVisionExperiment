@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.26)
+
+include(FetchContent)
+
+add_subdirectory(glm)
+add_subdirectory(stb)
+add_subdirectory(fmt)
+add_subdirectory(spdlog)
+add_subdirectory(glfw)
+add_subdirectory(catch2)
+add_subdirectory(magic-enum)
+add_subdirectory(opencv)
